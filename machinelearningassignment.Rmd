@@ -1,0 +1,266 @@
+---
+title: "Prediction of good method of working out!"
+author: "Fabricio Dujardin"
+date: "10/17/2017"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE, message= FALSE, }
+knitr::opts_chunk$set(echo = TRUE,message=FALSE,warning=FALSE)
+
+```
+
+## Background of the data
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. 
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg). 
+
+Read more: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har#ixzz4p9pxiYPa
+
+Read more: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har#ixzz4p9pXE5b7
+
+##Loading the data
+
+The required packages are mainly below but others are shown in the code afterwards when required. There data has been divided into 70% training and 30% testing for cross validation. The validation data is for prediction at the end of the paper.
+```{r}
+library(caret)
+library(ggplot2)
+library(data.table)
+library(cowplot)
+library(knitr)
+library(rpart)
+library(rpart.plot)
+library(pander)
+library(kableExtra)
+options(knitr.tableformat="html")
+Testing_forprediction <- data.table(read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!","")))
+Data <- data.table(read.csv("pml-training.csv",na.strings=c("NA","#DIV/0!","")))
+set.seed(123)
+#Partitioning the training set into 2
+inTrain <- createDataPartition(Data$classe,p=0.70,list=FALSE)
+Training <- Data[inTrain,]
+Testing <- Data[-inTrain,]
+
+```
+
+## Exploring and cleaning the data
+
+We will focus on the training data. The following steps are used to clean and adjust the data.
+
+* Drop out variables that are near zero variability
+* Drop out variables that are nearly collinear
+* Drop out variables that should not be predictors out of logic
+* Drop out variables that have too many NAs & have complese cases of the predictors
+
+The aim is to have predictors that matter for the final prediction.
+Afterwards we need to check if the validation data has the proper classes and names as the training data.
+
+### Near Zero Variability
+
+Many variables have been cut off as their variability does not meet the standards required.
+```{r}
+cols <- nearZeroVar(Training)
+nearZeroVar(Training, saveMetrics=T)
+length(cols)# number of variables dropped
+head(cols,10)
+dropped1 <- Training[,.SD,.SDcols=cols]
+Training1 <- Training[,.SD,.SDcols=-cols]
+```
+## Collinear Variables
+
+```{r, echo=FALSE}
+library(reshape2)
+numeric_cols <- Training1[,sapply(.SD,is.numeric)]
+cormat <- Training1[,cor(.SD,use="pairwise.complete.obs"),.SDcols=numeric_cols]
+##helper function used from sthda website
+reorder_cormat <- function(cormat){
+# Use correlation between variables as distance
+dd <- as.dist((1-cormat)/2)
+hc <- hclust(dd)
+cormat <-cormat[hc$order, hc$order]
+}
+# Reorder the correlation matrix
+cormat <- reorder_cormat(cormat)
+# Get lower triangle of the correlation matrix
+  get_lower_tri<-function(cormat){
+    cormat[upper.tri(cormat)] <- NA
+    return(cormat)
+  }
+  # Get upper triangle of the correlation matrix
+  get_upper_tri <- function(cormat){
+    cormat[lower.tri(cormat)]<- NA
+    return(cormat)
+  }
+upper_tri <- get_upper_tri(cormat)
+# Melt the correlation matrix
+melted_cormat <- melt(upper_tri, na.rm = TRUE)
+# Create a ggheatmap
+ggheatmap <- ggplot(melted_cormat, aes(Var2, Var1, fill = value))+
+ geom_tile(color = "white")+
+ scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+    name="Pearson\nCorrelation") +
+  theme_minimal()+ # minimal theme
+ theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 12, hjust = 1))+
+ coord_fixed()
+
+```
+
+I have selected 
+```{r,fig.height=10,fig.width=30}
+#code for ggheatmap has been hidden because it takes too much space for this assignment. Kindly check github for it.
+# Print the heatmap
+ggheatmap
+
+melted_cormat <- data.table(melted_cormat)
+
+ggplot(data=melted_cormat[value!=1,],aes(value)) + geom_histogram(bins=100) 
+
+above_0.9 <- melted_cormat[value!=1,][value>0.9|value< -0.9,]
+above_0.9 <- above_0.9[order(-abs(value),Var1), ]
+kable(head(above_0.9,5))
+
+```
+
+I decided to drop the following variables from the Training set due to the high correlations above 0.9 and below -0.9. 
+
+```{r}
+name_todrop2<- above_0.9[,unique(Var1)]
+Training2 <- Training1[,.SD,.SDcols=-as.character(name_todrop2)]
+
+```
+
+
+We have left the following amount of observations and variables.
+
+```{r}
+dim(Training2)
+```
+
+## Interprettable predictors
+
+The response is the variable class with 5 levels: A, B, C, D, E as mentioned in the background section of this assignment. The 
+```{r}
+Training2[,levels(classe)]
+descr <- Training[,.N,by=c("classe","user_name")]
+kable(dcast(descr,user_name ~ classe), caption="amount of observations per user by class")
+```
+All predictors seem to have an effect on the classe however the time stamp is repeated in different format and therefore I discard both parts of the raw time stamp.
+```{r}
+
+Training2 <- Training2[,.SD,.SDcols= -c("raw_timestamp_part_1","raw_timestamp_part_2")]
+```
+
+
+## Missing values
+
+The missing values per variable are as follows:
+```{r}
+missing <-Training2[,lapply(.SD,is.na)][,lapply(.SD,sum)][,lapply(.SD,function(x){if(x>0) x})]
+
+length(missing)
+missing[,1]/dim(Training2)[1]
+
+```
+
+
+Most of the variables have the same amount of NAs which is about 98% of the data. I further looked into it because I found it weird that the near zero variance did not discard this variables. Therefore I supposed these variables are relevant to a particular classe only. Apparently all classes have the same number of missing values per classe for hte 24 variables that have 98% of missing values. I therefore drop these variables.
+
+```{r}
+missing
+M<-Training2[,.SD,.SDcols=c("classe",names(missing))]
+kable(M[,lapply(.SD,is.na),by=classe][,lapply(.SD,sum,na.rm=T),by=classe][,1:2])
+```
+
+## Selected variables to use as predictors.
+
+We are left with fewer variables in the training data.
+
+```{r}
+Training3 <- Training2[,.SD,.SDcols= -names(missing)]
+dim(Training3)
+dim(Training3) == dim(na.omit(Training3))
+```
+
+#Models used with adjusted Training data
+
+
+* Decision tree
+
+We fit a predictive model for activity recognition using the decision tree algorithm.
+
+```{r}
+tree_ <- rpart(classe ~ ., data=Training3, method="class")
+prp(tree_)
+
+```
+
+The performance of the model with the validation data is as follows:
+
+```{r}
+
+tree_out <- predict(tree_, Testing, type = "class")
+tree_ct <- confusionMatrix(Testing$classe, tree_out)
+tree_ct
+accuracy <- postResample(tree_out, Testing$classe)
+#show table
+tab <- tree_ct
+kable(tab[2],caption="confusion table of the tree model")
+
+rm(tree_out)
+```
+The Accuracy is: 
+```{r}
+kable(tab$overall)
+```
+
+
+
+* Random Forest
+
+ It is quite accurate since at each split it has bootstrap variables. It grows multiple trees and vote. We will use 4 fold cross validation when applying the algorithm.
+
+```{r}
+#rf - random forest
+rf_ <- train(classe ~ ., data=Training3, method="rf", verbose=FALSE, trControl=trainControl(method ="cv",4), ntree = 250)
+#predict
+rf.out <- predict(rf_,newdata=Testing)
+#contigency table
+rf.ct <- confusionMatrix(rf.out,Testing$classe)
+#show table
+tab <- rf.ct
+kable(tab[2],caption="confusion table of the Random Forest model")
+
+rm(rf_out)
+rm(rf_ct)
+
+```
+
+The Accuracy is: 
+```{r}
+kable(tab$overall)
+```
+
+# Prediction/ Forecasting of the 20 classes
+
+We use the validation data from the first section and predict the 20 classes with all the models. As they were all equally good. But before we make sure that the predicted data has the same format as the training and testing. We therefore need to coerce it into the same type of data.
+
+```{r}
+
+
+Model.tree <- predict(tree_,Testing_forprediction)
+Model.rf <- predict(rf_,Testing_forprediction)
+
+result_predictions = data.frame(Model.tree)
+kable(data.frame(result_predictions), caption=" results for the final quiz")
+result_predictions = data.frame(Model.rf)
+kable(data.frame(result_predictions), caption=" results for the final quiz")
+
+write.table(result_predictions, "results.csv")
+```
+
