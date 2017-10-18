@@ -3,9 +3,10 @@ title: "Prediction of good method of working out!"
 author: "Fabricio Dujardin"
 date: "10/17/2017"
 output:
-  html_document:
+  md_document:
     toc: true
     toc_depth: 2
+ 
 ---
 
 ```{r setup, include=FALSE, message= FALSE, }

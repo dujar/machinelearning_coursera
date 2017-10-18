@@ -4,5 +4,5 @@ account: rpubs
 server: rpubs.com
 appId: https://api.rpubs.com/api/v1/document/319468/fd5f825c75104724bbc504601faed133
 bundleId: https://api.rpubs.com/api/v1/document/319468/fd5f825c75104724bbc504601faed133
-url: http://rpubs.com/publish/claim/319468/24cbc6e100f7497aa0965ee0d4ffe3f8
-when: 1508249621.428
+url: http://rpubs.com/dujarfa/319468
+when: 1508315761.19446
