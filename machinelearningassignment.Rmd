@@ -153,7 +153,7 @@ kable(dcast(descr,user_name ~ classe), caption="amount of observations per user 
 All predictors seem to have an effect on the classe however the time stamp is repeated in different format and therefore I discard both parts of the raw time stamp.
 ```{r}
 
-Training2 <- Training2[,.SD,.SDcols= -c("raw_timestamp_part_1","raw_timestamp_part_2")]
+Training2 <- Training2[,.SD,.SDcols= -c("raw_timestamp_part_1","raw_timestamp_part_2","user_name","cvtd_timestamp","X","num_window")]
 ```
 
 
